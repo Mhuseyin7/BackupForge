@@ -14,9 +14,16 @@ services:
       - ${BACKUP_SOURCE_PATH:?set in .env}:/data:ro
       - backupforge-restore:/restore
     depends_on:
-      postgres: { condition: service_started }
+      postgres: { condition: service_healthy }
       redis: { condition: service_started }
       volume-init: { condition: service_completed_successfully }
+  web:
+    build: ./frontend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports: ["3000:3000"]
+    depends_on:
+      api: { condition: service_started }
   worker:
     build: .
     command: celery -A backend.app.worker.celery_app worker --loglevel=INFO
@@ -30,7 +37,22 @@ services:
       - backupforge-data:/var/lib/backupforge
       - ${BACKUP_SOURCE_PATH:?set in .env}:/data:ro
     depends_on:
-      postgres: { condition: service_started }
+      postgres: { condition: service_healthy }
+      redis: { condition: service_started }
+      volume-init: { condition: service_completed_successfully }
+  beat:
+    build: .
+    command: celery -A backend.app.worker.celery_app beat --loglevel=INFO
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      BACKUPFORGE_DATABASE_URL: postgresql+psycopg://backupforge:${POSTGRES_PASSWORD:?set in .env}@postgres:5432/backupforge
+      BACKUPFORGE_REDIS_URL: redis://redis:6379/0
+    volumes:
+      - backupforge-data:/var/lib/backupforge
+    depends_on:
+      postgres: { condition: service_healthy }
       redis: { condition: service_started }
       volume-init: { condition: service_completed_successfully }
   volume-init:
@@ -47,6 +69,11 @@ services:
       POSTGRES_DB: backupforge
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
     volumes: ["postgres-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U backupforge -d backupforge"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
   redis:
     image: redis:7-alpine
     command: ["redis-server", "--appendonly", "yes"]

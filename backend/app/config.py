@@ -19,6 +19,12 @@ class Settings(BaseSettings):
     allowed_source_roots: str = "/data"
     allowed_restore_roots: str = "/restore"
     max_upload_bytes: int | None = None
+    enable_docker_verification: bool = False
+    cors_origins: str = "http://localhost:3000"
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [value.strip() for value in self.cors_origins.split(",") if value.strip()]
 
     @property
     def source_roots(self) -> tuple[Path, ...]:

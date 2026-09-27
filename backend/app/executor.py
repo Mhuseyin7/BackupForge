@@ -58,11 +58,18 @@ def execute_backup(run_id: str) -> None:
                     backend.delete(storage_key)
                 finally:
                     raise RuntimeError("remote checksum mismatch")
+            if job.source_type == "postgresql" and source_config.get("verify_restore"):
+                if not app_settings.enable_docker_verification:
+                    raise RuntimeError("Docker restore verification is required by this job but disabled on this worker")
+                from .verification import verify_postgresql_artifact
+                verify_postgresql_artifact(artifact_path, app_settings.encryption_key(), source_config, app_settings.data_dir / "verify")
             completed = _now()
             session.add(Artifact(job_id=job.id, run_id=run.id, started_at=run.started_at, completed_at=completed, original_size=original, compressed_size=packed, checksum=digest, destination=job.destination.name, storage_key=storage_key, verification_status=VerificationState.VERIFIED))
             run.state, run.completed_at = RunState.COMPLETED, completed
             session.add(AuditLog(event="backup.completed", resource_type="run", resource_id=str(run.id), detail={"artifact_checksum": digest}))
             session.commit()
+            from .notifications import dispatch
+            dispatch("backup.completed", {"run_id": str(run.id), "job_id": str(job.id)})
         except Exception as exc:
             session.rollback()
             run = session.get(BackupRun, UUID(run_id))
@@ -72,6 +79,8 @@ def execute_backup(run_id: str) -> None:
                 run.error_detail = "Backup failed. Consult worker logs; secret-bearing command output is suppressed."
                 session.add(AuditLog(event="backup.failed", resource_type="run", resource_id=str(run.id), detail={"code": type(exc).__name__}))
                 session.commit()
+                from .notifications import dispatch
+                dispatch("backup.failed", {"run_id": str(run_id), "code": type(exc).__name__})
             logger.exception("Backup run failed id=%s type=%s", run_id, type(exc).__name__)
         finally:
             if artifact_path:

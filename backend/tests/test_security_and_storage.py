@@ -1,10 +1,14 @@
 import io
 import os
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 import pytest
 
 from backend.app.security import decrypt_json, encrypt_json
 from backend.app.storage import LocalStorage, safe_storage_key
+from backend.app.retention import artifacts_to_delete
 
 
 def test_credentials_are_authenticated_and_not_plaintext():
@@ -24,4 +28,18 @@ def test_local_storage_rejects_traversal_and_upload_is_atomic(tmp_path):
         store.upload("../escape", io.BytesIO(b"no"))
     with pytest.raises(ValueError):
         safe_storage_key("/absolute")
+
+
+@dataclass
+class Candidate:
+    id: object
+    completed_at: datetime
+
+
+def test_retention_never_selects_newest_valid_artifact():
+    now = datetime.now(timezone.utc)
+    newest, middle, oldest = (Candidate(uuid4(), now - timedelta(days=days)) for days in (0, 1, 30))
+    result = artifacts_to_delete([oldest, middle, newest], {"keep_latest": 1}, now)
+    assert newest not in result
+    assert {item.id for item in result} == {middle.id, oldest.id}
 

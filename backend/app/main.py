@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -14,14 +15,14 @@ from .artifacts import restore_filesystem
 from .auth import current_user, make_token, password_hash, require, verify_password
 from .config import settings
 from .db import get_session, init_db
-from .models import Artifact, AuditLog, BackupRun, Destination, Job, Role, RunState, User, VerificationState
+from .models import Artifact, AuditLog, BackupRun, Destination, Job, NotificationDelivery, NotificationTarget, Role, RunState, User, VerificationState
 from .security import decrypt_json, encrypt_json
 from .retention import artifacts_to_delete
 from .storage import backend_for
 from .worker import backup_task
 
 app = FastAPI(title="BackupForge", version="0.1.0", openapi_url="/api/v1/openapi.json", docs_url="/api/v1/docs")
-app.add_middleware(CORSMiddleware, allow_origins=[], allow_credentials=False, allow_methods=["GET", "POST", "DELETE"], allow_headers=["Authorization", "Content-Type"])
+app.add_middleware(CORSMiddleware, allow_origins=settings().cors_origin_list, allow_credentials=False, allow_methods=["GET", "POST", "DELETE"], allow_headers=["Authorization", "Content-Type"])
 
 
 @app.on_event("startup")
@@ -69,6 +70,13 @@ class JobInput(BaseModel):
 class RestoreInput(BaseModel):
     target: str
     confirmation: str
+
+
+class NotificationInput(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    kind: str
+    config: dict = Field(repr=False)
+    events: list[str] = Field(default_factory=list)
 
 
 def audit(session: Session, event: str, actor: User | str, resource_type: str, resource_id: UUID | str, detail: dict | None = None) -> None:
@@ -147,6 +155,14 @@ def create_job(payload: JobInput, user: User = Depends(require(Role.OWNER, Role.
         raise HTTPException(404, "destination not found")
     if payload.source_type not in {"filesystem", "postgresql", "mysql", "mariadb", "docker_volume"}:
         raise HTTPException(422, "unsupported source type")
+    if payload.schedule:
+        try:
+            ZoneInfo(payload.timezone)
+            from croniter import croniter
+            if not croniter.is_valid(payload.schedule):
+                raise ValueError
+        except ValueError:
+            raise HTTPException(422, "schedule or timezone is invalid")
     reject_embedded_secrets(payload.source_config)
     job = Job(**payload.model_dump(exclude={"source_credentials"}), encrypted_source_credentials=encrypt_json(payload.source_credentials, settings().encryption_key()) if payload.source_credentials else None)
     session.add(job)
@@ -154,6 +170,19 @@ def create_job(payload: JobInput, user: User = Depends(require(Role.OWNER, Role.
     audit(session, "job.created", user, "job", job.id)
     session.commit()
     return job_view(job)
+
+
+@app.delete("/api/v1/jobs/{job_id}")
+def delete_job(job_id: UUID, user: User = Depends(require(Role.OWNER, Role.ADMIN)), session: Session = Depends(get_session)):
+    job = session.get(Job, job_id)
+    if not job:
+        raise HTTPException(404, "job not found")
+    if session.scalar(select(BackupRun).where(BackupRun.job_id == job_id, BackupRun.state.in_([RunState.RUNNING, RunState.UPLOADING, RunState.VERIFYING])).limit(1)):
+        raise HTTPException(409, "cannot delete a job with an active run")
+    audit(session, "job.deleted", user, "job", job.id)
+    session.delete(job)
+    session.commit()
+    return {"status": "deleted"}
 
 
 @app.post("/api/v1/jobs/{job_id}/runs")
@@ -178,6 +207,31 @@ def runs(_: User = Depends(current_user), session: Session = Depends(get_session
 @app.get("/api/v1/artifacts")
 def artifacts(_: User = Depends(current_user), session: Session = Depends(get_session)):
     return [{"id": str(a.id), "job_id": str(a.job_id), "checksum": a.checksum, "original_size": a.original_size, "compressed_size": a.compressed_size, "destination": a.destination, "storage_key": a.storage_key, "verification_status": a.verification_status.value, "completed_at": a.completed_at} for a in session.scalars(select(Artifact).order_by(Artifact.completed_at.desc()).limit(200))]
+
+
+@app.get("/api/v1/notifications")
+def notification_targets(_: User = Depends(current_user), session: Session = Depends(get_session)):
+    return [{"id": str(target.id), "name": target.name, "kind": target.kind, "events": target.events, "enabled": target.enabled} for target in session.scalars(select(NotificationTarget).order_by(NotificationTarget.name))]
+
+
+@app.post("/api/v1/notifications")
+def create_notification(payload: NotificationInput, user: User = Depends(require(Role.OWNER, Role.ADMIN)), session: Session = Depends(get_session)):
+    if payload.kind not in {"webhook", "discord", "telegram", "email"}:
+        raise HTTPException(422, "notification kind must be webhook, discord, telegram, or email")
+    supported = {"backup.completed", "backup.failed", "verification.failed", "retention.failed", "destination.unavailable"}
+    if any(event not in supported for event in payload.events):
+        raise HTTPException(422, "unsupported notification event")
+    target = NotificationTarget(name=payload.name, kind=payload.kind, encrypted_config=encrypt_json(payload.config, settings().encryption_key()), events=payload.events)
+    session.add(target)
+    session.flush()
+    audit(session, "notification.created", user, "notification", target.id)
+    session.commit()
+    return {"id": str(target.id), "name": target.name, "kind": target.kind}
+
+
+@app.get("/api/v1/notifications/deliveries")
+def notification_deliveries(_: User = Depends(require(Role.OWNER, Role.ADMIN)), session: Session = Depends(get_session)):
+    return [{"target_id": str(item.target_id), "event": item.event, "status": item.status, "created_at": item.created_at} for item in session.scalars(select(NotificationDelivery).order_by(NotificationDelivery.created_at.desc()).limit(100))]
 
 
 @app.post("/api/v1/artifacts/{artifact_id}/restore")

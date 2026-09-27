@@ -10,4 +10,4 @@ RUN pip install --no-cache-dir .
 RUN useradd --system --create-home --uid 10001 backupforge && mkdir -p /var/lib/backupforge && chown -R backupforge:backupforge /app /var/lib/backupforge
 USER backupforge
 EXPOSE 8000
-CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn backend.app.main:app --host 0.0.0.0 --port 8000"]

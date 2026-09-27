@@ -79,6 +79,7 @@ class BackupRun(Base):
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     job_id: Mapped[UUID] = mapped_column(ForeignKey("jobs.id"), index=True)
     state: Mapped[RunState] = mapped_column(Enum(RunState), default=RunState.QUEUED, index=True)
+    queued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -113,4 +114,25 @@ class AuditLog(Base):
     resource_type: Mapped[str] = mapped_column(String(64))
     resource_id: Mapped[str] = mapped_column(String(64))
     detail: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class NotificationTarget(Base):
+    __tablename__ = "notification_targets"
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    name: Mapped[str] = mapped_column(String(200), unique=True)
+    kind: Mapped[str] = mapped_column(String(32))
+    encrypted_config: Mapped[str] = mapped_column(Text)
+    events: Mapped[list] = mapped_column(JSON, default=list)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class NotificationDelivery(Base):
+    __tablename__ = "notification_deliveries"
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    target_id: Mapped[UUID] = mapped_column(ForeignKey("notification_targets.id"), index=True)
+    event: Mapped[str] = mapped_column(String(100), index=True)
+    status: Mapped[str] = mapped_column(String(24))
+    detail: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -20,6 +20,9 @@ Projenin odağı yalnızca backup oluşturmak değildir. Her artifact; encrypt e
 - Guided ve path-safe filesystem restore
 - Role-gated FastAPI API, audit log, health/readiness ve metrics endpoint'leri
 - Docker Compose ile non-root deployment
+- Timezone-aware cron scheduler; downtime sonrasında sınırsız backlog oluşturmaz
+- Encrypted Webhook, Discord, Telegram ve SMTP notification targets
+- Optional isolated PostgreSQL restore verification with read-only validation queries
 
 ## Core workflow
 
@@ -71,6 +74,7 @@ docker compose up --build
 ```
 
 API default olarak `http://localhost:8000` üzerinden erişilebilir.
+Web operations console ise `http://localhost:3000` adresindedir.
 
 ### 3. Bootstrap owner
 
@@ -137,6 +141,23 @@ Retention policy örneği:
 
 Retention yalnızca `VERIFIED` artifact'leri değerlendirir. En yeni valid artifact hiçbir koşulda delete listesine alınmaz. Endpoint default olarak `dry_run=true` davranır.
 
+## Scheduling & notifications
+
+Jobs cron expression ve IANA timezone ile schedule edilebilir. Celery Beat her dakika due job'ları kontrol eder. Downtime sonrasında tüm kaçırılmış periyotlar için backlog oluşturmak yerine en fazla bir run queue edilir.
+
+Notification targets `backup.completed`, `backup.failed`, `verification.failed`, `retention.failed` ve `destination.unavailable` event'lerini destekler. Webhook URL'leri HTTPS olmalıdır; target configuration AES-GCM ile encrypted olarak saklanır.
+
+## PostgreSQL automated restore verification
+
+PostgreSQL job source config içinde `verify_restore: true` ve bir veya daha fazla `SELECT` validation query tanımlanabilir. Dedicated, Docker-access-enabled verification worker aşağıdaki işlemi yapar:
+
+```text
+encrypted artifact → decrypt → decompress → temporary PostgreSQL container
+→ pg_restore → SELECT validation queries → destroy container
+```
+
+Bu feature default kapalıdır. Yalnızca Docker access'i security-reviewed, isolated bir worker'a verildiğinde `BACKUPFORGE_ENABLE_DOCKER_VERIFICATION=true` ile açılmalıdır. Verification gerekli olduğu halde worker capability yoksa run fail olur; success olarak raporlanmaz.
+
 ## API overview
 
 | Endpoint | Purpose |
@@ -171,6 +192,7 @@ Docker ile tested flows:
 - Local storage checksum verification
 - Stream encryption/decryption round-trip
 - Filesystem backup → artifact → restore smoke test
+- CI: backend lint/unit tests ve Next.js production build
 
 ## Disaster recovery
 
