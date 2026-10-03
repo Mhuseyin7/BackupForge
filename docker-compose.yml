@@ -17,13 +17,18 @@ services:
       postgres: { condition: service_healthy }
       redis: { condition: service_started }
       volume-init: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"from urllib.request import urlopen; urlopen('http://localhost:8000/health', timeout=2)\""]
+      interval: 5s
+      timeout: 3s
+      retries: 20
   web:
     build: ./frontend
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:8000
     ports: ["3000:3000"]
     depends_on:
-      api: { condition: service_started }
+      api: { condition: service_healthy }
   worker:
     build: .
     command: celery -A backend.app.worker.celery_app worker --loglevel=INFO
@@ -37,9 +42,7 @@ services:
       - backupforge-data:/var/lib/backupforge
       - ${BACKUP_SOURCE_PATH:?set in .env}:/data:ro
     depends_on:
-      postgres: { condition: service_healthy }
-      redis: { condition: service_started }
-      volume-init: { condition: service_completed_successfully }
+      api: { condition: service_healthy }
   beat:
     build: .
     command: celery -A backend.app.worker.celery_app beat --loglevel=INFO
@@ -52,9 +55,7 @@ services:
     volumes:
       - backupforge-data:/var/lib/backupforge
     depends_on:
-      postgres: { condition: service_healthy }
-      redis: { condition: service_started }
-      volume-init: { condition: service_completed_successfully }
+      api: { condition: service_healthy }
   volume-init:
     build: .
     user: "0:0"
