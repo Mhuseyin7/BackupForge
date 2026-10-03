@@ -20,6 +20,7 @@ from .security import decrypt_json, encrypt_json
 from .retention import artifacts_to_delete
 from .storage import backend_for
 from .worker import backup_task
+from .rate_limit import limit
 
 app = FastAPI(title="BackupForge", version="0.1.0", openapi_url="/api/v1/openapi.json", docs_url="/api/v1/docs")
 app.add_middleware(CORSMiddleware, allow_origins=settings().cors_origin_list, allow_credentials=False, allow_methods=["GET", "POST", "DELETE"], allow_headers=["Authorization", "Content-Type"])
@@ -46,6 +47,10 @@ class RegisterInput(BaseModel):
 
 class LoginInput(RegisterInput):
     pass
+
+
+class UserInput(RegisterInput):
+    role: Role = Role.VIEWER
 
 
 class DestinationInput(BaseModel):
@@ -105,7 +110,7 @@ def ready(session: Session = Depends(get_session)):
 
 
 @app.post("/api/v1/auth/register")
-def register(payload: RegisterInput, session: Session = Depends(get_session)):
+def register(payload: RegisterInput, _: None = Depends(limit("bootstrap", 5, 3600)), session: Session = Depends(get_session)):
     # First account bootstrap only; subsequent identities must be owner-provisioned.
     if session.scalar(select(func.count()).select_from(User)):
         raise HTTPException(403, "initial owner already exists")
@@ -117,13 +122,30 @@ def register(payload: RegisterInput, session: Session = Depends(get_session)):
 
 
 @app.post("/api/v1/auth/login")
-def login(payload: LoginInput, session: Session = Depends(get_session)):
+def login(payload: LoginInput, _: None = Depends(limit("login", 10, 900)), session: Session = Depends(get_session)):
     user = session.scalar(select(User).where(User.email == payload.email.strip().lower()))
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(401, "invalid credentials")
     audit(session, "auth.login", user, "user", user.id)
     session.commit()
     return {"access_token": make_token(user), "token_type": "bearer", "role": user.role.value}
+
+
+@app.get("/api/v1/users")
+def users(_: User = Depends(require(Role.OWNER)), session: Session = Depends(get_session)):
+    return [{"id": str(item.id), "email": item.email, "role": item.role.value, "created_at": item.created_at} for item in session.scalars(select(User).order_by(User.email))]
+
+
+@app.post("/api/v1/users")
+def create_user(payload: UserInput, owner: User = Depends(require(Role.OWNER)), session: Session = Depends(get_session)):
+    if session.scalar(select(User).where(User.email == payload.email.strip().lower())):
+        raise HTTPException(409, "email already exists")
+    user = User(email=payload.email.strip().lower(), password_hash=password_hash(payload.password), role=payload.role)
+    session.add(user)
+    session.flush()
+    audit(session, "user.created", owner, "user", user.id, {"role": user.role.value})
+    session.commit()
+    return {"id": str(user.id), "email": user.email, "role": user.role.value}
 
 
 @app.get("/api/v1/destinations")
