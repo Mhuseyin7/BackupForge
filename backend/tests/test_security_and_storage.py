@@ -12,6 +12,7 @@ from backend.app.storage import LocalStorage, safe_storage_key
 from backend.app.retention import artifacts_to_delete
 from backend.app.config import Settings
 from backend.app.sources import FilesystemSource
+from backend.app.notifications import _validate_public_https_url
 
 
 def test_credentials_are_authenticated_and_not_plaintext():
@@ -62,4 +63,9 @@ def test_filesystem_include_pattern_descends_into_selected_directory(tmp_path):
     with tarfile.open(fileobj=output) as archive:
         assert "database/dump.sql" in archive.getnames()
         assert "ignore.txt" not in archive.getnames()
+
+
+def test_notification_target_rejects_private_network_address():
+    with pytest.raises(ValueError):
+        _validate_public_https_url("https://127.0.0.1/internal-hook")
 

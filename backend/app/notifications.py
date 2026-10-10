@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import json
+import ipaddress
+import socket
 import smtplib
 from email.message import EmailMessage
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from sqlalchemy import select
 
@@ -17,12 +19,28 @@ from .security import decrypt_json
 ALLOWED_EVENTS = {"backup.completed", "backup.failed", "verification.failed", "retention.failed", "destination.unavailable"}
 
 
-def _post(url: str, body: dict) -> None:
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, message, headers, newurl):
+        return None
+
+
+def _validate_public_https_url(url: str) -> None:
     parsed = urlparse(url)
-    if parsed.scheme != "https" or not parsed.netloc:
-        raise ValueError("notification URL must use https")
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("notification URL must be an absolute https URL without userinfo")
+    try:
+        addresses = {item[4][0] for item in socket.getaddrinfo(parsed.hostname, 443, type=socket.SOCK_STREAM)}
+    except socket.gaierror as exc:
+        raise ValueError("notification host cannot be resolved") from exc
+    if not addresses or any(not ipaddress.ip_address(address).is_global for address in addresses):
+        raise ValueError("notification URL must resolve only to public addresses")
+
+
+def _post(url: str, body: dict) -> None:
+    _validate_public_https_url(url)
     request = Request(url, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"}, method="POST")
-    with urlopen(request, timeout=10) as response:
+    # No system proxy and no redirects: notification targets must be explicit, public HTTPS endpoints.
+    with build_opener(ProxyHandler({}), _NoRedirect()).open(request, timeout=10) as response:
         if not 200 <= response.status < 300:
             raise RuntimeError("notification endpoint rejected delivery")
 
