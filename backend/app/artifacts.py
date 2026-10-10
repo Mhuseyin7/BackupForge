@@ -22,7 +22,26 @@ def _ensure_space(directory: Path, required: int = 64 * 1024 * 1024) -> None:
         raise RuntimeError("insufficient temporary disk space")
 
 
-def create_artifact(source: BackupSourceAdapter, compression: str, key: bytes, temp_dir: Path) -> tuple[Path, int, int, str]:
+class _SizeLimitedWriter:
+    def __init__(self, output, maximum: int | None):
+        self.output = output
+        self.maximum = maximum
+        self.written = 0
+
+    def write(self, data: bytes) -> int:
+        if self.maximum is not None and self.written + len(data) > self.maximum:
+            raise RuntimeError("backup exceeds BACKUPFORGE_MAX_UPLOAD_BYTES")
+        self.written += len(data)
+        return self.output.write(data)
+
+    def flush(self, *args) -> None:
+        self.output.flush(*args)
+
+    def writable(self) -> bool:
+        return True
+
+
+def create_artifact(source: BackupSourceAdapter, compression: str, key: bytes, temp_dir: Path, max_upload_bytes: int | None = None) -> tuple[Path, int, int, str]:
     """Creates a streamed, encrypted artifact; no source archive is accumulated in memory."""
     _ensure_space(temp_dir)
     fd, generated = tempfile.mkstemp(prefix="backupforge-", suffix=".bforge", dir=temp_dir)
@@ -31,10 +50,11 @@ def create_artifact(source: BackupSourceAdapter, compression: str, key: bytes, t
     try:
         with artifact.open("wb") as raw:
             encryptor = ArtifactEncryptor(raw, key, {"version": 1, "compression": compression, "cipher": "AES-256-GCM"})
+            limited_encryptor = _SizeLimitedWriter(encryptor, max_upload_bytes)
             if compression == "zstd":
-                compressed = zstandard.ZstdCompressor(level=3).stream_writer(encryptor, closefd=False)
+                compressed = zstandard.ZstdCompressor(level=3).stream_writer(limited_encryptor, closefd=False)
             elif compression == "gzip":
-                compressed = gzip.GzipFile(fileobj=encryptor, mode="wb", mtime=0)
+                compressed = gzip.GzipFile(fileobj=limited_encryptor, mode="wb", mtime=0)
             else:
                 raise ValueError("compression must be zstd or gzip")
             try:

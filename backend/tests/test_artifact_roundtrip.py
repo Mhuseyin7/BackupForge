@@ -26,3 +26,8 @@ def test_tampered_artifact_is_not_accepted(tmp_path):
     with artifact.open("rb") as stream:
         with pytest.raises(Exception):
             decrypt_to_file(stream, key, tmp_path / "decrypted")
+
+
+def test_artifact_respects_configured_upload_limit(tmp_path):
+    with pytest.raises(RuntimeError, match="MAX_UPLOAD_BYTES"):
+        create_artifact(BytesSource(), "gzip", os.urandom(32), tmp_path, max_upload_bytes=1)

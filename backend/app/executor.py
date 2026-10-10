@@ -43,7 +43,13 @@ def execute_backup(run_id: str) -> None:
             session.commit()
             source_config = {**job.source_config, **(decrypt_json(job.encrypted_source_credentials, app_settings.encryption_key()) if job.encrypted_source_credentials else {})}
             source = source_for(job.source_type, source_config, app_settings)
-            artifact_path, original, packed, digest = create_artifact(source, job.compression, app_settings.encryption_key(), app_settings.data_dir / "tmp")
+            artifact_path, original, packed, digest = create_artifact(
+                source,
+                job.compression,
+                app_settings.encryption_key(),
+                app_settings.data_dir / "tmp",
+                app_settings.max_upload_bytes,
+            )
             destination_credentials = decrypt_json(job.destination.encrypted_credentials, app_settings.encryption_key()) if job.destination.encrypted_credentials else {}
             backend = backend_for(job.destination.kind, job.destination.config, destination_credentials)
             storage_key = f"jobs/{job.id}/{run.id}.bforge"
