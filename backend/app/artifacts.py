@@ -5,6 +5,7 @@ import hashlib
 import os
 import shutil
 import tempfile
+import tarfile
 from pathlib import Path
 from typing import BinaryIO
 
@@ -119,7 +120,7 @@ def restore_filesystem(artifact: BinaryIO, key: bytes, target: Path, temp_dir: P
             reader = gzip.open(compressed, "rb")
         else:
             raise ValueError("unsupported compression")
-        with reader, __import__("tarfile").open(fileobj=reader, mode="r|") as archive:
+        with reader, tarfile.open(fileobj=reader, mode="r|") as archive:
             for member in archive:
                 destination = (target / member.name).resolve()
                 if destination != target and target not in destination.parents:
