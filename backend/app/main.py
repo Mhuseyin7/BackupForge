@@ -19,7 +19,7 @@ from .db import get_session, init_db
 from .models import Artifact, AuditLog, BackupRun, Destination, Job, NotificationDelivery, NotificationTarget, Role, RunState, User, VerificationState
 from .security import decrypt_json, encrypt_json
 from .retention import artifacts_to_delete
-from .storage import backend_for
+from .storage import backend_for, local_destination_path
 from .worker import backup_task
 from .rate_limit import limit
 
@@ -91,7 +91,13 @@ def audit(session: Session, event: str, actor: User | str, resource_type: str, r
 
 def reject_embedded_secrets(config: dict) -> None:
     sensitive = {"password", "secret", "secret_key", "access_key", "token", "credential", "credentials"}
-    if any(str(key).lower() in sensitive for key in config):
+    def contains_secret(value: object) -> bool:
+        if isinstance(value, dict):
+            return any(str(key).lower() in sensitive or contains_secret(item) for key, item in value.items())
+        if isinstance(value, list):
+            return any(contains_secret(item) for item in value)
+        return False
+    if contains_secret(config):
         raise HTTPException(422, "place credentials in the dedicated credentials field")
 
 
@@ -166,6 +172,11 @@ def create_destination(payload: DestinationInput, user: User = Depends(require(R
     if payload.kind not in {"local", "s3"}:
         raise HTTPException(422, "destination kind must be local or s3")
     reject_embedded_secrets(payload.config)
+    if payload.kind == "local":
+        try:
+            local_destination_path(payload.config["path"], settings().destination_roots)
+        except (KeyError, TypeError, ValueError):
+            raise HTTPException(422, "local destination must be under BACKUPFORGE_ALLOWED_DESTINATION_ROOTS")
     destination = Destination(name=payload.name, kind=payload.kind, config=payload.config, encrypted_credentials=encrypt_json(payload.credentials, settings().encryption_key()) if payload.credentials else None)
     session.add(destination)
     session.flush()

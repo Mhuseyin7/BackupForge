@@ -10,6 +10,7 @@ services:
     ports: ["8000:8000"]
     volumes:
       - backupforge-data:/var/lib/backupforge
+      - backupforge-storage:/var/lib/backupforge/storage
       # Mount only explicitly trusted backup roots, read-only where possible.
       - ${BACKUP_SOURCE_PATH:?set in .env}:/data:ro
       - backupforge-restore:/restore
@@ -40,6 +41,7 @@ services:
       BACKUPFORGE_REDIS_URL: redis://redis:6379/0
     volumes:
       - backupforge-data:/var/lib/backupforge
+      - backupforge-storage:/var/lib/backupforge/storage
       - ${BACKUP_SOURCE_PATH:?set in .env}:/data:ro
     depends_on:
       api: { condition: service_healthy }
@@ -54,6 +56,7 @@ services:
       BACKUPFORGE_REDIS_URL: redis://redis:6379/0
     volumes:
       - backupforge-data:/var/lib/backupforge
+      - backupforge-storage:/var/lib/backupforge/storage
     depends_on:
       api: { condition: service_healthy }
   volume-init:
@@ -62,6 +65,7 @@ services:
     command: ["chown", "-R", "10001:10001", "/var/lib/backupforge", "/restore"]
     volumes:
       - backupforge-data:/var/lib/backupforge
+      - backupforge-storage:/var/lib/backupforge/storage
       - backupforge-restore:/restore
   postgres:
     image: postgres:16-alpine
@@ -81,6 +85,7 @@ services:
     volumes: ["redis-data:/data"]
 volumes:
   backupforge-data:
+  backupforge-storage:
   postgres-data:
   redis-data:
   backupforge-restore:

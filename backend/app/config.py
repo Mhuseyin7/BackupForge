@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     bootstrap_token: str | None = None
     allowed_source_roots: str = "/data"
     allowed_restore_roots: str = "/restore"
+    allowed_destination_roots: str = "/var/lib/backupforge/storage"
     max_upload_bytes: int | None = None
     enable_docker_verification: bool = False
     docker_volume_helper_image: str | None = None
@@ -38,6 +39,10 @@ class Settings(BaseSettings):
     def restore_roots(self) -> tuple[Path, ...]:
         return tuple(Path(value).resolve() for value in self.allowed_restore_roots.split(",") if value)
 
+    @property
+    def destination_roots(self) -> tuple[Path, ...]:
+        return tuple(Path(value).resolve() for value in self.allowed_destination_roots.split(",") if value)
+
     def encryption_key(self) -> bytes:
         if not self.master_key:
             raise RuntimeError("BACKUPFORGE_MASTER_KEY is required; refusing insecure startup")
@@ -55,6 +60,8 @@ class Settings(BaseSettings):
             raise RuntimeError("BACKUPFORGE_AUTH_SECRET must be at least 32 characters")
         if not self.bootstrap_token or len(self.bootstrap_token) < 32:
             raise RuntimeError("BACKUPFORGE_BOOTSTRAP_TOKEN must be at least 32 characters")
+        if "*" in self.cors_origin_list:
+            raise RuntimeError("BACKUPFORGE_CORS_ORIGINS must not contain wildcard origins")
         if self.enable_docker_verification:
             self.require_pinned_image(self.postgres_verification_image, "BACKUPFORGE_POSTGRES_VERIFICATION_IMAGE")
 

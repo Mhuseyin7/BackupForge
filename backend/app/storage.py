@@ -8,6 +8,13 @@ from pathlib import Path
 from typing import BinaryIO
 
 
+def local_destination_path(path: str, allowed_roots: tuple[Path, ...]) -> Path:
+    destination = Path(path).resolve()
+    if not allowed_roots or not any(destination == root or root in destination.parents for root in allowed_roots):
+        raise ValueError("local destination is outside BACKUPFORGE_ALLOWED_DESTINATION_ROOTS")
+    return destination
+
+
 def safe_storage_key(key: str) -> str:
     if not key or key.startswith(("/", "\\")) or ".." in Path(key).parts or not re.fullmatch(r"[A-Za-z0-9._/=-]+", key):
         raise ValueError("unsafe storage key")
@@ -85,7 +92,8 @@ class S3Storage(StorageBackend):
 
 def backend_for(kind: str, config: dict, credentials: dict) -> StorageBackend:
     if kind == "local":
-        return LocalStorage(config["path"])
+        from .config import settings
+        return LocalStorage(str(local_destination_path(config["path"], settings().destination_roots)))
     if kind == "s3":
         return S3Storage(config, credentials)
     raise ValueError(f"unsupported destination kind: {kind}")
