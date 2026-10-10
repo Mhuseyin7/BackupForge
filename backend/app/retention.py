@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 
@@ -14,7 +13,7 @@ def artifacts_to_delete(artifacts: list, policy: dict, now: datetime | None = No
     latest = int(policy.get("keep_latest", 1))
     keep.update(item.id for item in ordered[:max(1, latest)])
 
-    def keep_period(field: str, count: int, period):
+    def keep_period(count: int, period):
         seen = set()
         for item in ordered:
             if item.completed_at < now - timedelta(days=count * period[1]):
@@ -25,10 +24,10 @@ def artifacts_to_delete(artifacts: list, policy: dict, now: datetime | None = No
                 seen.add(marker)
 
     if (daily := int(policy.get("daily", 0))) > 0:
-        keep_period("daily", daily, (lambda d: d.date(), 1))
+        keep_period(daily, (lambda d: d.date(), 1))
     if (weekly := int(policy.get("weekly", 0))) > 0:
-        keep_period("weekly", weekly, (lambda d: d.isocalendar()[:2], 7))
+        keep_period(weekly, (lambda d: d.isocalendar()[:2], 7))
     if (monthly := int(policy.get("monthly", 0))) > 0:
-        keep_period("monthly", monthly, (lambda d: (d.year, d.month), 31))
+        keep_period(monthly, (lambda d: (d.year, d.month), 31))
     return [item for item in ordered if item.id not in keep]
 

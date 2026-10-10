@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import hmac
+from pathlib import Path
 from zoneinfo import ZoneInfo
 from uuid import UUID
 
@@ -287,7 +287,7 @@ def restore(artifact_id: UUID, payload: RestoreInput, user: User = Depends(requi
     destination = job.destination
     credentials = decrypt_json(destination.encrypted_credentials, settings().encryption_key()) if destination.encrypted_credentials else {}
     backend = backend_for(destination.kind, destination.config, credentials)
-    target = __import__("pathlib").Path(payload.target).resolve()
+    target = Path(payload.target).resolve()
     if not any(target == root or root in target.parents for root in settings().restore_roots):
         raise HTTPException(422, "restore target is outside BACKUPFORGE_ALLOWED_RESTORE_ROOTS")
     audit(session, "restore.started", user, "artifact", artifact.id, {"target": str(target)})

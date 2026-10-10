@@ -6,8 +6,6 @@ from pathlib import Path
 from uuid import UUID
 
 import redis
-from sqlalchemy import select
-
 from .artifacts import create_artifact
 from .config import settings
 from .db import SessionLocal
