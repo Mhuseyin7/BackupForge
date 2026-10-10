@@ -184,6 +184,7 @@ Interactive OpenAPI documentation: `/api/v1/docs`
 
 ```powershell
 py -m pip install -e ".[dev]"
+alembic upgrade head
 py -m pytest
 py -m ruff check backend
 ```

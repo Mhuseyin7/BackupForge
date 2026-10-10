@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from .artifacts import restore_filesystem
 from .auth import current_user, make_token, password_hash, require, verify_password
 from .config import settings
-from .db import get_session, init_db
+from .db import get_session
 from .models import Artifact, AuditLog, BackupRun, Destination, Job, NotificationDelivery, NotificationTarget, Role, RunState, User, VerificationState
 from .security import decrypt_json, encrypt_json
 from .retention import artifacts_to_delete
@@ -31,7 +31,6 @@ app.add_middleware(CORSMiddleware, allow_origins=settings().cors_origin_list, al
 def startup() -> None:
     settings().validate_security()
     settings().data_dir.mkdir(parents=True, exist_ok=True)
-    init_db()
 
 
 @app.middleware("http")
