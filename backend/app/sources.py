@@ -36,13 +36,33 @@ class FilesystemSource(BackupSourceAdapter):
             fnmatch.fnmatch(name, rule) for rule in self.excludes
         )
 
+    def _should_descend(self, relative: Path) -> bool:
+        name = relative.as_posix()
+        if any(fnmatch.fnmatch(name, rule) or rule.startswith(f"{name}/") for rule in self.excludes):
+            return False
+        # An include such as `database/**` must still allow walking `database` itself.
+        return any(fnmatch.fnmatch(name, rule) or rule.startswith(f"{name}/") for rule in self.includes)
+
+    def _inside_root(self, path: Path) -> bool:
+        resolved = path.resolve(strict=True)
+        return resolved == self.root or self.root in resolved.parents
+
     def write_to(self, output: BinaryIO) -> int:
         total = 0
-        with tarfile.open(fileobj=output, mode="w|") as archive:
+        visited_directories: set[Path] = set()
+        with tarfile.open(fileobj=output, mode="w|", dereference=self.symlinks == "follow") as archive:
             for directory, names, files in os.walk(self.root, followlinks=self.symlinks == "follow"):
                 directory_path = Path(directory)
+                if self.symlinks == "follow":
+                    resolved_directory = directory_path.resolve(strict=True)
+                    if not self._inside_root(directory_path):
+                        raise RuntimeError(f"symlink target escapes source root: {directory_path}")
+                    if resolved_directory in visited_directories:
+                        names[:] = []
+                        continue
+                    visited_directories.add(resolved_directory)
                 # Never traverse excluded child directories.
-                names[:] = [n for n in names if self._selected((directory_path / n).relative_to(self.root))]
+                names[:] = [n for n in names if self._should_descend((directory_path / n).relative_to(self.root))]
                 for name in [*names, *files]:
                     item = directory_path / name
                     relative = item.relative_to(self.root)
@@ -50,6 +70,8 @@ class FilesystemSource(BackupSourceAdapter):
                         continue
                     if item.is_symlink() and self.symlinks == "skip":
                         continue
+                    if item.is_symlink() and self.symlinks == "follow" and not self._inside_root(item):
+                        raise RuntimeError(f"symlink target escapes source root: {relative}")
                     try:
                         archive.add(item, arcname=relative.as_posix(), recursive=False)
                         if item.is_file() and not item.is_symlink():
