@@ -117,15 +117,19 @@ class MySQLSource(_CommandSource):
 
 
 class DockerVolumeSource(BackupSourceAdapter):
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, app_settings: Settings):
         self.volume = config["volume"]
         if not self.volume.replace("_", "").replace("-", "").isalnum():
             raise ValueError("invalid Docker volume name")
+        self.helper_image = app_settings.require_pinned_image(
+            app_settings.docker_volume_helper_image,
+            "BACKUPFORGE_DOCKER_VOLUME_HELPER_IMAGE",
+        )
 
     def write_to(self, output: BinaryIO) -> int:
         # Explicitly require a reviewed, dedicated helper image. The API container never mounts Docker.
-        command = ["docker", "run", "--rm", "--read-only", "-v", f"{self.volume}:/source:ro", "backupforge-volume-helper:latest"]
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        command = ["docker", "run", "--rm", "--network", "none", "--read-only", "--cap-drop", "ALL", "-v", f"{self.volume}:/source:ro", self.helper_image]
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         assert process.stdout is not None
         size = 0
         for chunk in iter(lambda: process.stdout.read(1024 * 1024), b""):
@@ -145,5 +149,5 @@ def source_for(kind: str, config: dict, app_settings: Settings) -> BackupSourceA
     if kind in {"mysql", "mariadb"}:
         return MySQLSource(config)
     if kind == "docker_volume":
-        return DockerVolumeSource(config)
+        return DockerVolumeSource(config, app_settings)
     raise ValueError(f"unsupported source type: {kind}")

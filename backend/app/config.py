@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -21,6 +22,8 @@ class Settings(BaseSettings):
     allowed_restore_roots: str = "/restore"
     max_upload_bytes: int | None = None
     enable_docker_verification: bool = False
+    docker_volume_helper_image: str | None = None
+    postgres_verification_image: str | None = None
     cors_origins: str = "http://localhost:3000"
 
     @property
@@ -52,6 +55,14 @@ class Settings(BaseSettings):
             raise RuntimeError("BACKUPFORGE_AUTH_SECRET must be at least 32 characters")
         if not self.bootstrap_token or len(self.bootstrap_token) < 32:
             raise RuntimeError("BACKUPFORGE_BOOTSTRAP_TOKEN must be at least 32 characters")
+        if self.enable_docker_verification:
+            self.require_pinned_image(self.postgres_verification_image, "BACKUPFORGE_POSTGRES_VERIFICATION_IMAGE")
+
+    @staticmethod
+    def require_pinned_image(image: str | None, setting_name: str) -> str:
+        if not image or not re.fullmatch(r"[A-Za-z0-9./_-]+@sha256:[a-f0-9]{64}", image):
+            raise RuntimeError(f"{setting_name} must be a sha256 digest-pinned image reference")
+        return image
 
 
 @lru_cache

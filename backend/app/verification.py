@@ -14,6 +14,7 @@ from uuid import uuid4
 import zstandard
 
 from .artifacts import decrypt_to_file
+from .config import settings
 
 
 def _run(command: list[str], timeout: int = 60) -> None:
@@ -50,8 +51,17 @@ def verify_postgresql_artifact(artifact_path: Path, key: bytes, config: dict, te
         else:
             raise ValueError("unsupported artifact compression")
         env_file.write_text(f"POSTGRES_PASSWORD={password}\n", encoding="utf-8")
-        image = config.get("verification_image", "postgres:16-alpine")
-        _run(["docker", "run", "-d", "--rm", "--name", name, "--env-file", str(env_file), image], timeout=30)
+        image = settings().require_pinned_image(
+            settings().postgres_verification_image,
+            "BACKUPFORGE_POSTGRES_VERIFICATION_IMAGE",
+        )
+        _run([
+            "docker", "run", "-d", "--rm", "--name", name, "--network", "none", "--read-only",
+            "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
+            "--tmpfs", "/var/lib/postgresql/data:rw,noexec,nosuid,size=1g",
+            "--tmpfs", "/tmp:rw,noexec,nosuid,size=1g",
+            "--env-file", str(env_file), image,
+        ], timeout=30)
         ready = False
         for _ in range(30):
             check = subprocess.run(["docker", "exec", name, "pg_isready", "-U", "postgres"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
@@ -64,9 +74,12 @@ def verify_postgresql_artifact(artifact_path: Path, key: bytes, config: dict, te
         _run(["docker", "cp", str(dump), f"{name}:/tmp/backup.dump"])
         _run(["docker", "exec", name, "pg_restore", "-U", "postgres", "-d", "postgres", "--clean", "--if-exists", "/tmp/backup.dump"], timeout=int(config.get("verification_timeout_seconds", 900)))
         for query in config["verification_queries"]:
-            if not isinstance(query, str) or not query.strip().lower().startswith("select"):
-                raise ValueError("verification queries must be SELECT statements")
-            _run(["docker", "exec", name, "psql", "-U", "postgres", "-d", "postgres", "--no-psqlrc", "--set", "ON_ERROR_STOP=1", "--command", query])
+            if not isinstance(query, str):
+                raise ValueError("verification queries must be one semicolon-free SELECT statement")
+            normalized = query.strip()
+            if not normalized.lower().startswith("select") or ";" in normalized:
+                raise ValueError("verification queries must be one semicolon-free SELECT statement")
+            _run(["docker", "exec", name, "psql", "-U", "postgres", "-d", "postgres", "--no-psqlrc", "--set", "ON_ERROR_STOP=1", "--command", f"BEGIN TRANSACTION READ ONLY; {normalized}; COMMIT;"])
     finally:
         subprocess.run(["docker", "rm", "-f", name], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
         for path in (compressed, dump, env_file):

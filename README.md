@@ -160,6 +160,8 @@ encrypted artifact → decrypt → decompress → temporary PostgreSQL container
 
 Bu feature default kapalıdır. Yalnızca Docker access'i security-reviewed, isolated bir worker'a verildiğinde `BACKUPFORGE_ENABLE_DOCKER_VERIFICATION=true` ile açılmalıdır. Verification gerekli olduğu halde worker capability yoksa run fail olur; success olarak raporlanmaz.
 
+Docker helper ve verification image değerleri `BACKUPFORGE_DOCKER_VOLUME_HELPER_IMAGE` / `BACKUPFORGE_POSTGRES_VERIFICATION_IMAGE` ile digest-pinned (`image@sha256:…`) verilmelidir. Job config bu image seçimlerini değiştiremez.
+
 ## API overview
 
 | Endpoint | Purpose |
