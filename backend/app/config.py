@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     # Deliberately has no default: production must explicitly provide key material.
     master_key: str | None = None
     auth_secret: str | None = None
+    bootstrap_token: str | None = None
     allowed_source_roots: str = "/data"
     allowed_restore_roots: str = "/restore"
     max_upload_bytes: int | None = None
@@ -49,6 +50,8 @@ class Settings(BaseSettings):
         self.encryption_key()
         if not self.auth_secret or len(self.auth_secret) < 32:
             raise RuntimeError("BACKUPFORGE_AUTH_SECRET must be at least 32 characters")
+        if not self.bootstrap_token or len(self.bootstrap_token) < 32:
+            raise RuntimeError("BACKUPFORGE_BOOTSTRAP_TOKEN must be at least 32 characters")
 
 
 @lru_cache

@@ -55,6 +55,7 @@ Bir artifact'in success status alabilmesi için local SHA-256 değeri, upload so
 ```bash
 BACKUPFORGE_MASTER_KEY=<32-byte-base64-key>
 BACKUPFORGE_AUTH_SECRET=<at-least-32-characters>
+BACKUPFORGE_BOOTSTRAP_TOKEN=<separate-at-least-32-character-token>
 POSTGRES_PASSWORD=<strong-password>
 BACKUP_SOURCE_PATH=/absolute/path/to/trusted/source
 ```
@@ -82,6 +83,7 @@ Web operations console ise `http://localhost:3000` adresindedir.
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/auth/register \
+  -H "X-Bootstrap-Token: <BACKUPFORGE_BOOTSTRAP_TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{"email":"owner@example.com","password":"use-a-long-unique-password"}'
 ```

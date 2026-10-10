@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hmac
 from zoneinfo import ZoneInfo
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
@@ -110,10 +111,17 @@ def ready(session: Session = Depends(get_session)):
 
 
 @app.post("/api/v1/auth/register")
-def register(payload: RegisterInput, _: None = Depends(limit("bootstrap", 5, 3600)), session: Session = Depends(get_session)):
+def register(
+    payload: RegisterInput,
+    bootstrap_token: str | None = Header(default=None, alias="X-Bootstrap-Token"),
+    _: None = Depends(limit("bootstrap", 5, 3600)),
+    session: Session = Depends(get_session),
+):
     # First account bootstrap only; subsequent identities must be owner-provisioned.
     if session.scalar(select(func.count()).select_from(User)):
         raise HTTPException(403, "initial owner already exists")
+    if not bootstrap_token or not hmac.compare_digest(bootstrap_token, settings().bootstrap_token or ""):
+        raise HTTPException(403, "bootstrap authorization failed")
     user = User(email=payload.email.strip().lower(), password_hash=password_hash(payload.password), role=Role.OWNER)
     session.add(user)
     audit(session, "user.bootstrap", user, "user", user.id)
